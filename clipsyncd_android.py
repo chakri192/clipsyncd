@@ -10,8 +10,9 @@ import time
 import logging
 import os
 
-MAC_IP = "100.120.25.47"
-ANDROID_IP = "100.115.151.55"
+MAC_IP = "your.mac.tailscale.ip"
+ANDROID_IP = "your.android.tailscale.ip"
+
 PORT = 59876
 POLL_INTERVAL = 0.5
 REMOTE_SET_COOLDOWN = 1.5
