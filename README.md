@@ -174,13 +174,29 @@ nohup python3 ~/clipsyncd.py > ~/clipsyncd.log 2>&1 &
 
 ---
 
-## License
+## Author
 
-MIT
+Created by [chakri192](https://github.com/chakri192)
 
 ## Contributors
 
 | Contributor | Role |
 |---|---|
 | [chakri192](https://github.com/chakri192) | Author |
-| Claude (Anthropic) | AI pair programmer |
+| [aider](https://github.com/Aider-AI/aider) | AI pair programmer |
+
+### AI tooling
+
+README and code contributions assisted by [aider](https://github.com/Aider-AI/aider) using local LLMs via [Ollama](https://ollama.com):
+
+| Model | Used for |
+|---|---|
+| `qwen2.5-coder:7b` | Code suggestions, refactoring |
+| `llama3.1:8b` | Prose, documentation, commit messages |
+
+---
+
+## License
+
+MIT
+
