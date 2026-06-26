@@ -12,6 +12,7 @@ import logging
 
 MAC_IP = "your.mac.tailscale.ip"
 ANDROID_IP = "your.android.tailscale.ip"
+
 PORT = 59876
 POLL_INTERVAL = 0.5
 REMOTE_SET_COOLDOWN = 1.5
