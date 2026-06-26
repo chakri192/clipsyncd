@@ -68,7 +68,7 @@ def server_thread():
     global _remote_set_at
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind((ANDROID_IP, PORT))
+    srv.bind(("0.0.0.0", PORT))
     srv.listen(5)
     log.info(f"listening on {ANDROID_IP}:{PORT}")
     while True:
@@ -105,6 +105,8 @@ def watcher_thread():
             send_to_mac(current)
 
 if __name__ == "__main__":
-    log.info("clipsyncd starting")
+    log.info("clipsyncd starting, waiting for network...")
+    time.sleep(10)  # wait for Tailscale to come up after reboot
+    log.info("clipsyncd running")
     threading.Thread(target=server_thread, daemon=True).start()
     watcher_thread()
