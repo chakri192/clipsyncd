@@ -11,7 +11,7 @@ import time
 import logging
 import os
 
-MAC_HOSTNAME = "chakris-macbook-air.local"
+MAC_HOSTNAME = "your-mac-hostname.local"
 PORT = 59876
 POLL_INTERVAL = 0.5
 REMOTE_SET_COOLDOWN = 1.5
