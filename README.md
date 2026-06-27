@@ -1,6 +1,6 @@
 # clipsyncd
 
-Bidirectional clipboard sync between Mac and Android over LAN. Copy on one device, paste on the other — no BLE, no cloud, no Tailscale, no third-party servers.
+Bidirectional clipboard sync between Mac and Android over LAN. Copy on one device, paste on the other — no BLE, no cloud, no third-party servers.
 
 ## How it works
 
