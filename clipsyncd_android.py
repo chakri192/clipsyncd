@@ -1,6 +1,7 @@
 #!/data/data/com.termux/files/usr/bin/env python3
 """
-clipsyncd - Android side (Termux)
+clipsyncd - bidirectional clipboard sync over LAN (mDNS)
+Android side
 """
 
 import socket
@@ -10,12 +11,12 @@ import time
 import logging
 import os
 
-MAC_IP = "your.mac.tailscale.ip"
-ANDROID_IP = "your.android.tailscale.ip"
-
+MAC_HOSTNAME = "chakris-macbook-air.local"
 PORT = 59876
 POLL_INTERVAL = 0.5
 REMOTE_SET_COOLDOWN = 1.5
+RECONNECT_INTERVAL = 5
+KEEPALIVE_INTERVAL = 30  # send keepalive every 30s so Mac always knows our IP
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,34 +27,44 @@ log = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _remote_set_at = 0.0
+_mac_ip = None
 
 def get_clipboard():
     try:
-        result = subprocess.run(
-            ["termux-clipboard-get"], capture_output=True, timeout=3
-        )
+        result = subprocess.run(["termux-clipboard-get"], capture_output=True, timeout=3)
         return result.stdout.decode("utf-8", errors="replace")
     except Exception:
         return ""
 
 def set_clipboard(text):
     try:
-        subprocess.run(
-            ["termux-clipboard-set"],
-            input=text.encode("utf-8"),
-            check=True,
-            timeout=3
-        )
+        subprocess.run(["termux-clipboard-set"], input=text.encode("utf-8"), check=True, timeout=3)
     except Exception as e:
         log.error(f"termux-clipboard-set failed: {e}")
 
+def resolve_mac():
+    while True:
+        try:
+            ip = socket.gethostbyname(MAC_HOSTNAME)
+            log.info(f"resolved {MAC_HOSTNAME} -> {ip}")
+            return ip
+        except Exception:
+            log.warning(f"can't resolve {MAC_HOSTNAME}, retrying in {RECONNECT_INTERVAL}s")
+            time.sleep(RECONNECT_INTERVAL)
+
 def send_to_mac(text):
+    global _mac_ip
+    if not _mac_ip:
+        _mac_ip = resolve_mac()
     try:
-        with socket.create_connection((MAC_IP, PORT), timeout=3) as s:
+        with socket.create_connection((_mac_ip, PORT), timeout=3) as s:
             data = text.encode("utf-8")
             s.sendall(len(data).to_bytes(4, "big") + data)
+        return True
     except Exception as e:
         log.warning(f"send to mac failed: {e}")
+        _mac_ip = None
+        return False
 
 def recv_exact(s, n):
     buf = b""
@@ -70,7 +81,7 @@ def server_thread():
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("0.0.0.0", PORT))
     srv.listen(5)
-    log.info(f"listening on {ANDROID_IP}:{PORT}")
+    log.info(f"listening on 0.0.0.0:{PORT}")
     while True:
         try:
             conn, addr = srv.accept()
@@ -86,9 +97,25 @@ def server_thread():
         except Exception as e:
             log.error(f"server error: {e}")
 
+def keepalive_thread():
+    """Send empty keepalive to Mac every 30s so Mac always knows our IP."""
+    while True:
+        time.sleep(KEEPALIVE_INTERVAL)
+        try:
+            if not _mac_ip:
+                continue
+            with socket.create_connection((_mac_ip, PORT), timeout=3) as s:
+                # send 0-length message as keepalive
+                s.sendall((0).to_bytes(4, "big"))
+            log.info("keepalive sent to mac")
+        except Exception as e:
+            log.warning(f"keepalive failed: {e}")
+
 def watcher_thread():
-    global _remote_set_at
     last = get_clipboard()
+    # send initial ping so Mac learns our IP immediately
+    log.info("sending initial ping to mac")
+    send_to_mac("")
     while True:
         time.sleep(POLL_INTERVAL)
         current = get_clipboard()
@@ -106,7 +133,8 @@ def watcher_thread():
 
 if __name__ == "__main__":
     log.info("clipsyncd starting, waiting for network...")
-    time.sleep(10)  # wait for Tailscale to come up after reboot
+    time.sleep(10)
     log.info("clipsyncd running")
     threading.Thread(target=server_thread, daemon=True).start()
+    threading.Thread(target=keepalive_thread, daemon=True).start()
     watcher_thread()
