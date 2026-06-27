@@ -1,6 +1,6 @@
 # clipsyncd
 
-Bidirectional clipboard sync between Mac and Android over Tailscale. Copy on one device, paste on the other — no BLE, no cloud, no third-party servers.
+Bidirectional clipboard sync between Mac and Android over LAN. Copy on one device, paste on the other — no BLE, no cloud, no Tailscale, no third-party servers.
 
 ## How it works
 
@@ -8,24 +8,35 @@ Bidirectional clipboard sync between Mac and Android over Tailscale. Copy on one
 |---|---|
 | Copy on Mac | Clipboard syncs to Android instantly |
 | Copy on Android | Clipboard syncs to Mac instantly |
-| VPN active | Works — uses Tailscale private IP, not LAN |
+| VPN active | Works — LAN traffic bypasses VPN tunnel |
 | Terminal closed | Keeps running — launchd on Mac, nohup on Android |
 | Phone reboot | Auto-restarts via Termux:Boot |
-| Echo loop | Suppressed via 1.5s cooldown after remote set |
+| IP changed | Android re-resolves Mac via mDNS on failure |
+| Mac restarted | Android sends keepalive every 30s, Mac re-learns Android IP |
+
+---
+
+## How it works internally
+
+1. Android resolves Mac via `<hostname>.local` mDNS — no hardcoded IPs
+2. On startup, Android sends an initial ping so Mac immediately learns Android's IP
+3. Android sends a keepalive every 30s so Mac never loses track of Android's IP
+4. Each side runs a TCP server on port `59876` and polls clipboard every 0.5s
+5. On change, pushes to the other device via length-prefixed TCP message
+6. A 1.5s cooldown suppresses echo loops after receiving from remote
+7. Mac uses `launchctl asuser <uid> pbcopy/pbpaste` — works correctly from launchd daemons
 
 ---
 
 ## Requirements
 
 **Mac**
-- Python 3 (system `/usr/bin/python3` is fine)
-- Tailscale
+- Python 3 (system `/usr/bin/python3`)
 
 **Android**
 - [Termux](https://f-droid.org/repo/com.termux_118.apk) — F-Droid only, not Play Store
 - [Termux:API](https://f-droid.org/repo/com.termux.api_51.apk) — F-Droid
 - [Termux:Boot](https://f-droid.org/repo/com.termux.boot_7.apk) — F-Droid
-- Tailscale
 
 > Play Store versions of Termux are outdated. Use F-Droid.
 
@@ -33,18 +44,7 @@ Bidirectional clipboard sync between Mac and Android over Tailscale. Copy on one
 
 ## Installation
 
-### 1. Set your IPs
-
-Edit both scripts and update:
-
-```python
-MAC_IP = "your.mac.tailscale.ip"
-ANDROID_IP = "your.android.tailscale.ip"
-```
-
-Get them with `tailscale ip` on Mac and the Tailscale app on Android.
-
-### 2. Mac setup
+### 1. Mac setup
 
 ```zsh
 sudo cp clipsyncd_mac.py /usr/local/bin/clipsyncd.py
@@ -81,15 +81,21 @@ Create `~/Library/LaunchAgents/com.user.clipsyncd.plist`:
 launchctl load ~/Library/LaunchAgents/com.user.clipsyncd.plist
 ```
 
+### 2. Update Mac hostname in Android script
+
+Edit `clipsyncd_android.py` and set:
+
+```python
+MAC_HOSTNAME = "your-mac-hostname.local"
+```
+
+Get your hostname with `hostname` on Mac.
+
 ### 3. Android setup (Termux)
 
 ```bash
 pkg install termux-api python
-
-# transfer clipsyncd_android.py to your phone, then:
 cp clipsyncd_android.py ~/clipsyncd.py
-
-# run
 nohup python3 ~/clipsyncd.py > ~/clipsyncd.log 2>&1 &
 ```
 
@@ -107,13 +113,14 @@ EOF
 chmod +x ~/.termux/boot/clipsyncd.sh
 ```
 
-Also disable battery optimization: Settings → Apps → Termux → Battery → Unrestricted
+Disable battery optimization: Settings > Apps > Termux > Battery > Unrestricted
 
 ---
 
 ## Useful commands
 
 **Mac**
+
 ```zsh
 # check status
 launchctl list | grep clipsyncd
@@ -127,6 +134,7 @@ launchctl load ~/Library/LaunchAgents/com.user.clipsyncd.plist
 ```
 
 **Android (Termux)**
+
 ```bash
 # check status
 pgrep -f clipsyncd.py && echo running || echo stopped
@@ -141,13 +149,15 @@ nohup python3 ~/clipsyncd.py > ~/clipsyncd.log 2>&1 &
 
 ---
 
-## How it works internally
+## Troubleshooting
 
-1. Both devices run a TCP server on port `59876` over Tailscale
-2. Each polls its own clipboard every 0.5s
-3. On change, pushes to the other device via length-prefixed TCP message
-4. A 1.5s cooldown suppresses echo loops after receiving from remote
-5. Mac uses `osascript` instead of `pbcopy`/`pbpaste` — works correctly from launchd daemons without a window server session
+| Problem | Fix |
+|---|---|
+| Android script stops after a while | Settings > Apps > Termux > Battery > Unrestricted |
+| Mac not receiving from Android | Check `sudo lsof -i :59876` — port must be listening |
+| Android can't resolve Mac hostname | Make sure both devices are on same WiFi |
+| Works on WiFi but not with VPN | Add Termux to VPN split tunnel bypass list on Android |
+| Echo loop | Cooldown is 1.5s — increase `REMOTE_SET_COOLDOWN` if needed |
 
 ---
 
@@ -158,41 +168,7 @@ nohup python3 ~/clipsyncd.py > ~/clipsyncd.log 2>&1 &
 | CPU | Near zero — sleeps 0.5s between polls |
 | RAM | ~15MB |
 | Battery | Minimal — no GPS, pure TCP |
-| Network | Tailscale only, direct peer-to-peer after first handshake |
-
----
-
-## Troubleshooting
-
-| Problem | Fix |
-|---|---|
-| Android script stops after a while | Settings → Apps → Termux → Battery → Unrestricted |
-| Mac not receiving from Android | Check `sudo lsof -i :59876` — port must be listening |
-| Tailscale slow on first connect | Run `tailscale ping <peer-ip>` once to force direct path |
-| Echo loop (same text bouncing) | Cooldown is 1.5s — if still happening, increase `REMOTE_SET_COOLDOWN` |
-| `pbcopy` not working from daemon | Script uses `osascript` — don't replace with `pbcopy` |
-
----
-
-## Author
-
-Created by [chakri192](https://github.com/chakri192)
-
-## Contributors
-
-| Contributor | Role |
-|---|---|
-| [chakri192](https://github.com/chakri192) | Author |
-| [aider](https://github.com/Aider-AI/aider) | AI pair programmer |
-
-### AI tooling
-
-README and code contributions assisted by [aider](https://github.com/Aider-AI/aider) using local LLMs via [Ollama](https://ollama.com):
-
-| Model | Used for |
-|---|---|
-| `qwen2.5-coder:7b` | Code suggestions, refactoring |
-| `llama3.1:8b` | Prose, documentation, commit messages |
+| Network | LAN only, direct peer-to-peer |
 
 ---
 
@@ -200,3 +176,9 @@ README and code contributions assisted by [aider](https://github.com/Aider-AI/ai
 
 MIT
 
+## Contributors
+
+| Contributor | Role |
+|---|---|
+| [chakri192](https://github.com/chakri192) | Author |
+| Claude (Anthropic) | AI pair programmer |

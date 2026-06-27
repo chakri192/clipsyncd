@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-clipsyncd - bidirectional clipboard sync over Tailscale
+clipsyncd - bidirectional clipboard sync over LAN (mDNS)
 Mac side
 """
 
@@ -9,9 +9,7 @@ import subprocess
 import threading
 import time
 import logging
-
-MAC_IP = "your.mac.tailscale.ip"
-ANDROID_IP = "your.android.tailscale.ip"
+import os
 
 PORT = 59876
 POLL_INTERVAL = 0.5
@@ -26,37 +24,51 @@ log = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _remote_set_at = 0.0
+_android_ip = None
+
+def get_uid():
+    return str(os.getuid())
 
 def get_clipboard():
     try:
-        script = 'get the clipboard'
+        uid = get_uid()
         result = subprocess.run(
-            ["osascript", "-e", script],
+            ["launchctl", "asuser", uid, "pbpaste"],
             capture_output=True, timeout=3
         )
-        return result.stdout.decode("utf-8", errors="replace").rstrip("\n")
-    except Exception:
+        return result.stdout.decode("utf-8", errors="replace")
+    except Exception as e:
+        log.error(f"get_clipboard failed: {e}")
         return ""
 
 def set_clipboard(text):
     try:
-        # escape backslashes and quotes for AppleScript string
-        escaped = text.replace("\\", "\\\\").replace('"', '\\"')
-        script = f'set the clipboard to "{escaped}"'
-        subprocess.run(
-            ["osascript", "-e", script],
-            check=True, timeout=3
+        uid = get_uid()
+        result = subprocess.run(
+            ["launchctl", "asuser", uid, "pbcopy"],
+            input=text.encode("utf-8"),
+            capture_output=True,
+            timeout=3
         )
+        if result.returncode != 0:
+            log.error(f"pbcopy failed: {result.stderr.decode()}")
+        else:
+            log.info(f"set clipboard ok ({len(text)} chars)")
     except Exception as e:
         log.error(f"set_clipboard failed: {e}")
 
 def send_to_android(text):
+    global _android_ip
+    if not _android_ip:
+        log.warning("android IP not known yet, skipping push")
+        return
     try:
-        with socket.create_connection((ANDROID_IP, PORT), timeout=3) as s:
+        with socket.create_connection((_android_ip, PORT), timeout=3) as s:
             data = text.encode("utf-8")
             s.sendall(len(data).to_bytes(4, "big") + data)
     except Exception as e:
         log.warning(f"send to android failed: {e}")
+        _android_ip = None
 
 def recv_exact(s, n):
     buf = b""
@@ -68,7 +80,7 @@ def recv_exact(s, n):
     return buf
 
 def server_thread():
-    global _remote_set_at
+    global _remote_set_at, _android_ip
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("0.0.0.0", PORT))
@@ -78,6 +90,8 @@ def server_thread():
         try:
             conn, addr = srv.accept()
             with conn:
+                _android_ip = addr[0]
+                log.info(f"android connected from {_android_ip}")
                 length = int.from_bytes(recv_exact(conn, 4), "big")
                 if length == 0:
                     continue
@@ -90,7 +104,6 @@ def server_thread():
             log.error(f"server error: {e}")
 
 def watcher_thread():
-    global _remote_set_at
     last = get_clipboard()
     while True:
         time.sleep(POLL_INTERVAL)
