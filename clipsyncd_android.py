@@ -10,10 +10,28 @@ import threading
 import time
 import logging
 import os
+import hmac
+import hashlib
 
 MAC_HOSTNAME = os.environ.get("CLIPSYNCD_MAC_HOSTNAME", "your-mac-hostname.local")
 PORT = 59876
 MAX_MESSAGE_BYTES = 10 * 1024 * 1024  # reject absurd length prefixes (DoS guard)
+
+# Shared secret for message authentication. Set the SAME value on both the
+# Mac and Android side (export CLIPSYNCD_SECRET=...). When set, every payload
+# carries an HMAC-SHA256 tag that the receiver verifies, so a stranger on the
+# LAN can't inject into your clipboard or read pushed contents blindly. If
+# unset, the daemon runs in legacy plaintext mode with a warning.
+SECRET = os.environ.get("CLIPSYNCD_SECRET")
+_HMAC_LEN = 32  # sha256 digest size
+
+def frame(data: bytes) -> bytes:
+    """Length-prefixed frame; includes an HMAC tag when SECRET is configured."""
+    header = len(data).to_bytes(4, "big")
+    if SECRET and data:
+        tag = hmac.new(SECRET.encode(), data, hashlib.sha256).digest()
+        return header + tag + data
+    return header + data
 POLL_INTERVAL = 0.5
 REMOTE_SET_COOLDOWN = 1.5
 RECONNECT_INTERVAL = 5
@@ -59,8 +77,7 @@ def send_to_mac(text):
         _mac_ip = resolve_mac()
     try:
         with socket.create_connection((_mac_ip, PORT), timeout=3) as s:
-            data = text.encode("utf-8")
-            s.sendall(len(data).to_bytes(4, "big") + data)
+            s.sendall(frame(text.encode("utf-8")))
         return True
     except Exception as e:
         log.warning(f"send to mac failed: {e}")
@@ -93,7 +110,16 @@ def server_thread():
                 if length > MAX_MESSAGE_BYTES:
                     log.warning(f"rejecting oversized message: {length} bytes")
                     continue
-                data = recv_exact(conn, length).decode("utf-8", errors="replace")
+                raw = recv_exact(conn, length + _HMAC_LEN) if SECRET else recv_exact(conn, length)
+                if SECRET:
+                    tag, payload = raw[:_HMAC_LEN], raw[_HMAC_LEN:]
+                    expected = hmac.new(SECRET.encode(), payload, hashlib.sha256).digest()
+                    if not hmac.compare_digest(tag, expected):
+                        log.warning("HMAC verification failed — dropping message")
+                        continue
+                else:
+                    payload = raw
+                data = payload.decode("utf-8", errors="replace")
                 log.info(f"received {len(data)} chars from mac")
                 with _lock:
                     _remote_set_at = time.time()
