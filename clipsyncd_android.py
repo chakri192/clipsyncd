@@ -11,8 +11,9 @@ import time
 import logging
 import os
 
-MAC_HOSTNAME = "your-mac-hostname.local"
+MAC_HOSTNAME = os.environ.get("CLIPSYNCD_MAC_HOSTNAME", "your-mac-hostname.local")
 PORT = 59876
+MAX_MESSAGE_BYTES = 10 * 1024 * 1024  # reject absurd length prefixes (DoS guard)
 POLL_INTERVAL = 0.5
 REMOTE_SET_COOLDOWN = 1.5
 RECONNECT_INTERVAL = 5
@@ -88,6 +89,9 @@ def server_thread():
             with conn:
                 length = int.from_bytes(recv_exact(conn, 4), "big")
                 if length == 0:
+                    continue
+                if length > MAX_MESSAGE_BYTES:
+                    log.warning(f"rejecting oversized message: {length} bytes")
                     continue
                 data = recv_exact(conn, length).decode("utf-8", errors="replace")
                 log.info(f"received {len(data)} chars from mac")
