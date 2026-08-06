@@ -1,7 +1,5 @@
 <div align="center">
 
-<img src="docs/signal.svg" width="840" alt="" />
-
 # clipsyncd
 
 **Bidirectional clipboard synchronisation between macOS and Android over a local network.**
