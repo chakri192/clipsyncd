@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="clipsyncd"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Mac IP address"
+        android:textSize="12sp" />
+    <EditText
+        android:id="@+id/macIpInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:inputType="text"
+        android:hint="192.168.0.5" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:text="Shared secret (optional)"
+        android:textSize="12sp" />
+    <EditText
+        android:id="@+id/secretInput"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:inputType="textPassword"
+        android:hint="CLIPSYNCD_SECRET" />
+
+    <Button
+        android:id="@+id/saveButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Save" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginVertical="20dp"
+        android:background="#33000000" />
+
+    <TextView
+        android:id="@+id/accessibilityStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Shizuku: unknown"
+        android:textSize="14sp" />
+    <Button
+        android:id="@+id/openAccessibilityButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Grant Shizuku permission" />
+
+    <TextView
+        android:id="@+id/serviceStatus"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:text="Service: stopped"
+        android:textSize="14sp" />
+    <Button
+        android:id="@+id/startServiceButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Start sync service" />
+    <Button
+        android:id="@+id/stopServiceButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Stop sync service" />
+
+</LinearLayout>

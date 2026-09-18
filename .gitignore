@@ -18,3 +18,9 @@ env/
 .mypy_cache/
 build/
 dist/
+
+# Android
+android-app/local.properties
+android-app/app/build/
+android-app/.gradle/
+android-app/.kotlin/
