@@ -2,6 +2,11 @@
 """
 clipsyncd - bidirectional clipboard sync over LAN (mDNS)
 Android side
+
+Superseded by android-app/: Android blocks clipboard reads from apps
+without UI focus, which a background Termux daemon never has. This script
+cannot reliably read a clipboard change made in another app. See the
+README's Architecture section.
 """
 
 import socket
