@@ -30,8 +30,9 @@ Copy a URL on a laptop and paste it on a phone half a second later. Copy a one-t
 | Phone's IP address changes | The Mac relearns it from the next inbound connection, within 30s |
 | Mac reboots | `launchd` restarts the daemon, which re-advertises itself over Bonjour |
 | Phone reboots | `SyncService` restarts automatically; Shizuku needs one tap to restart (see [Android](#3-android)) |
-| Either device switches networks (different Wi-Fi, different location) | Works unmodified as long as both are on the same network — mDNS discovery isn't tied to a specific IP or router |
-| VPN enabled | Unaffected — LAN traffic does not enter the tunnel |
+| Both devices move to a different network together (different Wi-Fi, a phone hotspot) | Works unmodified — mDNS discovery isn't tied to a specific IP or router, only to both devices sharing one local network |
+| Devices end up on *different* networks (phone on mobile data, different Wi-Fi than the Mac) | Does not work — see [Limitations](#limitations) |
+| VPN enabled on either device | Breaks sync if the VPN routes LAN traffic through its tunnel (most consumer VPNs do this by default) — confirmed directly with ProtonVPN's default full-tunnel mode |
 | Identical text copied twice | No transmission; nothing changed |
 
 ## Requirements
@@ -85,7 +86,8 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 5. Open the app and enter the shared secret, tap **Save**. Leave the Mac IP field blank — the app finds the Mac automatically via mDNS (see [Architecture](#architecture)); that field is only a manual fallback for networks where multicast is blocked.
 6. Tap **Grant Shizuku permission**, allow it.
-7. Tap **Start sync service**. The main screen shows "mDNS: found Mac at …" once discovery succeeds, usually within a few seconds.
+7. Tap **Start sync service**. The status card shows "found <ip>" for mDNS once discovery succeeds, usually within a few seconds.
+8. Set both **clipsyncd** and **Shizuku** to unrestricted battery: Settings → Apps → *(app)* → Battery → Unrestricted. Neither is exempted by default, and Android's standard battery management is exactly what caused the reliability problems that motivated building this app in the first place — skipping this step reintroduces that risk.
 
 ## Architecture
 
@@ -127,7 +129,9 @@ launchctl kickstart -k gui/$(id -u)/com.user.clipsyncd
 adb logcat -s ClipsyncdService:* ShizukuClipboard:*
 ```
 
-Or check in-app: the main screen shows Shizuku permission status and whether the service is running.
+Or check in-app: the main screen (Material 3, with dynamic color on Android 12+) shows color-coded status chips for Shizuku, the sync service, and mDNS discovery.
+
+The Android foreground service notification is unavoidable — Android requires one for any continuously-running background service, as a deliberate platform transparency measure, not an app setting — but it's trimmed to the minimum allowed: a single line, `IMPORTANCE_MIN` (which also suppresses its status bar icon entirely), no timestamp, sitting in the shade's collapsed "Silent" section rather than demanding attention.
 
 ## Troubleshooting
 
@@ -153,7 +157,9 @@ Or check in-app: the main screen shows Shizuku permission status and whether the
 
 **Shizuku dependency, no root.** The Android side needs Shizuku running and one manual restart after each phone reboot. This is a consequence of Android's background-clipboard-access restriction (see Architecture) — there is no way to avoid this without either root or making clipsyncd the device's default keyboard, which was rejected as a worse tradeoff.
 
-**Auto-discovery needs multicast.** mDNS relies on multicast traffic, which some networks (enterprise Wi-Fi, some guest networks) filter by policy regardless of client isolation settings. The manual-IP fallback in the Android app covers this case, but loses the "just works on any network" property.
+**Same network only — by design, not as a bug.** Everything here (TCP connections, mDNS discovery) is LAN-only, deliberately, to keep the "no cloud, no third-party server" property in the first line of this README. If the Mac and phone are on different networks — different Wi-Fi, phone on mobile data, either one behind a VPN that tunnels LAN traffic — sync simply does not work, and there is no fallback that fixes it short of reintroducing exactly the kind of dependency this project avoids (a VPN mesh like Tailscale, which is in fact what the very first version of this project used, or port-forwarding the Mac's port onto the public internet). A phone's mobile hotspot is the one exception that still works: the Mac joining it puts both devices back on one real local network, hotspot or not.
+
+**Auto-discovery needs multicast.** mDNS relies on multicast traffic, which some networks (enterprise Wi-Fi, some guest networks) filter by policy regardless of client isolation settings, even when both devices are otherwise on the same network. The manual-IP fallback in the Android app covers this case.
 
 ## Resource usage
 
