@@ -43,7 +43,7 @@ The Android side used to be a Termux script. It got rewritten as a real app beca
 | Mac's IP address changes | Phone rediscovers it via mDNS automatically |
 | Phone's IP address changes | Mac relearns it from the next inbound connection (≤30s) |
 | Mac reboots | `launchd` restarts the daemon; it re-advertises itself |
-| Phone reboots | Sync service restarts automatically; Shizuku needs one tap to restart |
+| Phone reboots | Sync service and Shizuku both restart automatically — provided Shizuku was started once via Wireless debugging (see [Android setup](#3-android)) and Wi-Fi is up at boot |
 | Both devices move to a new network together (new Wi-Fi, a phone hotspot) | Works unmodified |
 | Devices end up on *different* networks | Does not work — see [Limitations](#limitations) |
 | A VPN is active on either device | Usually breaks sync (most VPNs tunnel LAN traffic by default) |
@@ -85,10 +85,11 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.user.clipsyncd.plist
 
 **Step one — install and pair Shizuku**, from its [GitHub releases](https://github.com/RikkaApps/Shizuku/releases) or F-Droid:
 
-1. Settings → Developer options → enable **Wireless debugging**.
-2. Open Shizuku → **Start via Wireless debugging** → **Pairing** → follow the on-device flow.
-3. Tap **Start**. Shizuku now stays pairable across reboots — no computer needed again, just reopen the app and tap Start.
-4. Leave the permission prompt for step 6 below.
+1. Settings → Developer options → enable **Wireless debugging** and **Disable adb authorization timeout**. Leave both on.
+2. Open Shizuku → **Start via Wireless debugging** → **Pairing** → follow the on-device flow (open the "Pair device with pairing code" screen, then type the six-digit code into Shizuku's notification).
+3. Tap **Start**. It has to be *this* start method: Shizuku only restarts itself at boot without root if it was last launched via Wireless debugging. Starting it from a computer with `adb` works, but won't survive a reboot.
+4. Leave Shizuku's **Start on boot** setting on. It's labelled "(root)", but the same switch enables the wireless-debugging boot path. From here on Shizuku restarts itself at every boot — no computer, no tap.
+5. Leave the permission prompt for step 7 below.
 
 **Step two — build and install the app.** Needs the Android SDK; command-line tools are enough, Android Studio isn't required.
 
@@ -101,10 +102,10 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 **Step three — configure it in-app:**
 
-5. Enter the shared secret, tap **Save**. Leave the Mac IP field blank — mDNS finds it automatically (see [Architecture](#architecture)); that field only matters as a fallback.
-6. Tap **Grant Shizuku permission**, allow it.
-7. Tap **Start sync service**.
-8. Set both **clipsyncd** and **Shizuku** to unrestricted battery: Settings → Apps → *(app)* → Battery → Unrestricted. Skipping this reintroduces the exact reliability problem that motivated building a native app in the first place.
+6. Enter the shared secret, tap **Save**. Leave the Mac IP field blank — mDNS finds it automatically (see [Architecture](#architecture)); that field only matters as a fallback.
+7. Tap **Grant Shizuku permission**, allow it.
+8. Tap **Start sync service**.
+9. Set both **clipsyncd** and **Shizuku** to unrestricted battery: Settings → Apps → *(app)* → Battery → Unrestricted. Skipping this reintroduces the exact reliability problem that motivated building a native app in the first place.
 
 <div align="center">
 <img alt="clipsyncd Android app showing Shizuku granted, sync service running, and the Mac found via mDNS" src="docs/app-screenshot.png" width="320" />
@@ -191,7 +192,7 @@ Or just look at the app — the status card shows color-coded chips for Shizuku,
 
 | Symptom | Cause |
 |---|---|
-| Android→Mac stops after a phone reboot | Shizuku needs a manual "Start" tap after every reboot — open Shizuku, tap Start |
+| Android→Mac stops after a phone reboot | Shizuku didn't restart itself — usually because the phone booted with no Wi-Fi, or Shizuku was last started from a computer rather than via Wireless debugging. Open Shizuku and tap **Start** under "Start via Wireless debugging" |
 | Mac receives nothing from phone | `sudo lsof -i :59876` on the Mac — no listener means the daemon failed to start. On the phone, check Shizuku shows "running" and the app shows "permission granted" |
 | `readText failed` in Android logs | Shizuku isn't running, or its permission wasn't granted |
 | App shows "mDNS: not discovered" indefinitely | Run `dns-sd -B _clipsyncd._tcp local.` from another machine on the same network. If it finds nothing, the Mac's advertisement isn't running (check its log for "advertising … via Bonjour"). If it does find it but the phone still can't, the network is likely blocking multicast — enter the Mac's IP manually as a fallback |
@@ -209,7 +210,7 @@ Or just look at the app — the status card shows color-coded chips for Shizuku,
 
 **No queue.** If the peer is unreachable, that one clipboard entry is lost. The next change syncs normally.
 
-**Shizuku, no root.** The Android side needs Shizuku running, plus one manual restart after each phone reboot. That's the cost of working around Android's background-clipboard restriction without root or turning clipsyncd into the device's keyboard — both worse tradeoffs.
+**Shizuku, no root.** The Android side needs Shizuku running. It restarts itself after a reboot via its wireless-debugging path, which needs Wi-Fi to be up at that moment; if it isn't, one manual **Start** tap in Shizuku recovers it. That's the cost of working around Android's background-clipboard restriction without root or turning clipsyncd into the device's keyboard — both worse tradeoffs.
 
 **Same network only, by design.** Everything here — TCP connections, mDNS discovery — is LAN-only, on purpose, to keep the "no cloud, no third party" promise in the first line of this README.
 
