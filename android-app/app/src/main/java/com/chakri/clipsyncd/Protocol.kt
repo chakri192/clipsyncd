@@ -8,8 +8,10 @@ import javax.crypto.spec.SecretKeySpec
 
 /**
  * Wire protocol shared with clipsyncd_mac.py:
- * [4-byte big-endian length][32-byte HMAC-SHA256 tag if secret set and length>0][UTF-8 payload]
- * A zero-length frame is a keepalive and never carries a tag.
+ * [4-byte big-endian length][32-byte HMAC-SHA256 tag if secret is set][UTF-8 payload]
+ * A zero-length payload is a keepalive; it still carries a tag when a secret is
+ * set, so keepalives are authenticated too — without that, any device on the
+ * LAN could send a bare connection to redirect the Mac's next push to itself.
  */
 object Protocol {
     const val PORT = 59876
@@ -28,7 +30,7 @@ object Protocol {
 
     fun frame(secret: String?, data: ByteArray): ByteArray {
         val header = ByteBuffer.allocate(4).putInt(data.size).array()
-        if (!secret.isNullOrEmpty() && data.isNotEmpty()) {
+        if (!secret.isNullOrEmpty()) {
             val tag = hmacSha256(secret, data)
             return header + tag + data
         }
@@ -46,11 +48,10 @@ object Protocol {
         return buf
     }
 
-    /** Returns the verified payload text, or null for a keepalive (zero-length) frame. */
+    /** Returns the verified payload text, or null for a verified keepalive (empty payload). */
     fun readFrame(input: InputStream, secret: String?): String? {
         val lengthBytes = recvExact(input, 4)
         val length = ByteBuffer.wrap(lengthBytes).int
-        if (length == 0) return null
         if (length < 0 || length > MAX_MESSAGE_BYTES) {
             throw java.io.IOException("rejecting oversized message: $length bytes")
         }
@@ -67,6 +68,7 @@ object Protocol {
         } else {
             payload = raw
         }
+        if (payload.isEmpty()) return null
         return String(payload, Charsets.UTF_8)
     }
 }

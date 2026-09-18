@@ -29,9 +29,12 @@ SECRET = os.environ.get("CLIPSYNCD_SECRET")
 _HMAC_LEN = 32  # sha256 digest size
 
 def frame(data: bytes) -> bytes:
-    """Length-prefixed frame; includes an HMAC tag when SECRET is configured."""
+    """Length-prefixed frame; includes an HMAC tag when SECRET is configured.
+    Keepalives (empty data) are tagged too when SECRET is set — otherwise
+    they'd be an unauthenticated way for any LAN host to get the Mac to
+    learn its address and redirect the next push to itself."""
     header = len(data).to_bytes(4, "big")
-    if SECRET and data:
+    if SECRET:
         tag = hmac.new(SECRET.encode(), data, hashlib.sha256).digest()
         return header + tag + data
     return header + data
@@ -66,16 +69,21 @@ def get_uid():
     return str(os.getuid())
 
 def get_clipboard():
+    """Returns None on failure so the watcher can skip the cycle instead of
+    treating a transient pbpaste failure as a real clipboard change."""
     try:
         uid = get_uid()
         result = subprocess.run(
             ["launchctl", "asuser", uid, "pbpaste"],
             capture_output=True, timeout=3
         )
+        if result.returncode != 0:
+            log.error(f"pbpaste failed: {result.stderr.decode(errors='replace')}")
+            return None
         return result.stdout.decode("utf-8", errors="replace")
     except Exception as e:
         log.error(f"get_clipboard failed: {e}")
-        return ""
+        return None
 
 def set_clipboard(text):
     try:
@@ -124,24 +132,29 @@ def server_thread():
     while True:
         try:
             conn, addr = srv.accept()
+            conn.settimeout(5)  # a stalled peer must not hang the whole daemon
             with conn:
-                _android_ip = addr[0]
-                log.info(f"android connected from {_android_ip}")
                 length = int.from_bytes(recv_exact(conn, 4), "big")
-                if length == 0:
-                    continue
                 if length > MAX_MESSAGE_BYTES:
                     log.warning(f"rejecting oversized message: {length} bytes")
                     continue
-                raw = recv_exact(conn, length + _HMAC_LEN) if SECRET else recv_exact(conn, length)
                 if SECRET:
+                    raw = recv_exact(conn, length + _HMAC_LEN)
                     tag, payload = raw[:_HMAC_LEN], raw[_HMAC_LEN:]
                     expected = hmac.new(SECRET.encode(), payload, hashlib.sha256).digest()
                     if not hmac.compare_digest(tag, expected):
-                        log.warning("HMAC verification failed — dropping message")
+                        log.warning(f"HMAC verification failed from {addr[0]} — dropping message")
                         continue
                 else:
-                    payload = raw
+                    payload = recv_exact(conn, length)
+                # Only trust the source address once the message is verified
+                # (or SECRET is unset, the documented plaintext-mode tradeoff) —
+                # otherwise any LAN host could redirect the next push to itself
+                # just by opening a connection, verified or not.
+                _android_ip = addr[0]
+                log.info(f"android connected from {_android_ip}")
+                if length == 0:
+                    continue
                 data = payload.decode("utf-8", errors="replace")
                 log.info(f"received {len(data)} chars from android")
                 with _lock:
@@ -151,10 +164,12 @@ def server_thread():
             log.error(f"server error: {e}")
 
 def watcher_thread():
-    last = get_clipboard()
+    last = get_clipboard() or ""
     while True:
         time.sleep(POLL_INTERVAL)
         current = get_clipboard()
+        if current is None:
+            continue  # transient pbpaste failure — not a real change
         if current != last:
             last = current
             if not current:
