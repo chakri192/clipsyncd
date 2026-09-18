@@ -3,15 +3,18 @@ package com.chakri.clipsyncd
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
@@ -46,6 +49,17 @@ class SyncService : Service() {
         )
     }
 
+    // While the screen is off the phone's Wi-Fi sleeps and the Mac's pushes can
+    // miss it. The Mac holds what it couldn't deliver and hands it over the next
+    // time we contact it, so ping the moment we wake instead of waiting for the
+    // next 30s keepalive.
+    private val wakeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            Log.i(TAG, "${intent.action}, pinging mac")
+            sendToMac("")
+        }
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -53,6 +67,15 @@ class SyncService : Service() {
             running = true
             isRunning = true
             startForegroundWithNotification()
+            ContextCompat.registerReceiver(
+                this,
+                wakeReceiver,
+                IntentFilter().apply {
+                    addAction(Intent.ACTION_SCREEN_ON)
+                    addAction(Intent.ACTION_USER_PRESENT)
+                },
+                ContextCompat.RECEIVER_NOT_EXPORTED
+            )
             clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             nsdHelper.start()
             startServer()
@@ -67,6 +90,11 @@ class SyncService : Service() {
     override fun onDestroy() {
         running = false
         isRunning = false
+        try {
+            unregisterReceiver(wakeReceiver)
+        } catch (e: IllegalArgumentException) {
+            // never registered — service died before onStartCommand finished
+        }
         nsdHelper.stop()
         discoveredMacHost = null
         serverSocket?.close()
