@@ -6,7 +6,7 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
@@ -26,10 +26,18 @@
             </intent-filter>
         </activity>
 
+        <!-- specialUse rather than dataSync: Android 15+ caps dataSync foreground
+             services with a timeout and stops them, which silently ended sync.
+             This service is a long-running LAN daemon, which is what specialUse
+             is for. -->
         <service
             android:name=".SyncService"
-            android:foregroundServiceType="dataSync"
-            android:exported="false" />
+            android:foregroundServiceType="specialUse"
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Long-running local-network clipboard sync server; accepts TCP connections from the user's Mac and polls the clipboard" />
+        </service>
 
         <provider
             android:name="rikka.shizuku.ShizukuProvider"
