@@ -56,7 +56,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
         }
 
-        findViewById<MaterialButton>(R.id.openAccessibilityButton).setOnClickListener {
+        findViewById<MaterialButton>(R.id.grantShizukuButton).setOnClickListener {
             if (!Shizuku.pingBinder()) {
                 Toast.makeText(this, "Shizuku service is not running", Toast.LENGTH_SHORT).show()
             } else if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {

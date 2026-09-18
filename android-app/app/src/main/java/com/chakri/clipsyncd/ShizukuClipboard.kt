@@ -8,18 +8,17 @@ import rikka.shizuku.SystemServiceHelper
 
 /**
  * Reads the clipboard via a Shizuku-brokered binder call instead of the
- * normal ClipboardManager path. Confirmed empirically (see project history)
- * that Android denies ClipboardManager reads from apps without UI focus —
- * even ones with an enabled AccessibilityService — but a call made through
- * Shizuku (which proxies with adb-shell-level privilege) is not subject to
- * that focus check.
+ * normal ClipboardManager path. Android denies ClipboardManager reads to
+ * apps without UI focus (confirmed directly: plain reads work while the app
+ * is on-screen, return nothing every time from the background) — but a call
+ * made through Shizuku, which proxies with adb-shell-level privilege, isn't
+ * subject to that focus check.
  *
  * IClipboard is a hidden, non-SDK framework interface: reflecting into it
  * from a normal installed app is blocked by Android's hidden-API enforcement
- * (reflection on it silently reports NoSuchMethodException, confirmed via
- * logcat — an app_process-launched process isn't subject to this, which is
- * why the standalone probe worked but the app itself didn't until this
- * exemption was added).
+ * (confirmed directly — the reflective lookup silently reports
+ * NoSuchMethodException instead of finding the method), so the hidden-API
+ * exemption below is required too, not just the Shizuku privilege.
  */
 object ShizukuClipboard {
     private const val TAG = "ShizukuClipboard"
