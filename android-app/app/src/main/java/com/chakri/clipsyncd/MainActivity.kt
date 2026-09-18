@@ -20,6 +20,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var secretInput: EditText
     private lateinit var shizukuStatus: TextView
     private lateinit var serviceStatus: TextView
+    private lateinit var discoveryStatus: TextView
 
     private val shizukuPermissionListener = Shizuku.OnRequestPermissionResultListener { _, _ ->
         refreshStatus()
@@ -33,6 +34,7 @@ class MainActivity : AppCompatActivity() {
         secretInput = findViewById(R.id.secretInput)
         shizukuStatus = findViewById(R.id.accessibilityStatus)
         serviceStatus = findViewById(R.id.serviceStatus)
+        discoveryStatus = findViewById(R.id.discoveryStatus)
 
         macIpInput.setText(Prefs.getMacIp(this).orEmpty())
         secretInput.setText(Prefs.getSecret(this).orEmpty())
@@ -89,6 +91,8 @@ class MainActivity : AppCompatActivity() {
             else -> "Shizuku: permission NOT granted (required)"
         }
         serviceStatus.text = if (SyncService.isRunning) "Service: running" else "Service: stopped"
+        discoveryStatus.text = SyncService.discoveredMacHost?.let { "mDNS: found Mac at $it" }
+            ?: "mDNS: not discovered (using manual IP if set)"
     }
 
     companion object {

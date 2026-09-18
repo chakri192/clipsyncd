@@ -17,6 +17,8 @@ PORT = 59876
 POLL_INTERVAL = 0.5
 REMOTE_SET_COOLDOWN = 1.5
 MAX_MESSAGE_BYTES = 10 * 1024 * 1024  # reject absurd length prefixes (DoS guard)
+BONJOUR_SERVICE_TYPE = "_clipsyncd._tcp"
+BONJOUR_NAME = "clipsyncd"
 
 # Shared secret for message authentication. Set the SAME value on both the
 # Mac and Android side (export CLIPSYNCD_SECRET=...). When set, every payload
@@ -44,6 +46,21 @@ log = logging.getLogger(__name__)
 _lock = threading.Lock()
 _remote_set_at = 0.0
 _android_ip = None
+
+_bonjour_process = None
+
+def advertise_bonjour():
+    """Register via Bonjour so the Android app can find this Mac on any
+    network via NsdManager, instead of relying on a hardcoded IP."""
+    global _bonjour_process
+    try:
+        _bonjour_process = subprocess.Popen(
+            ["dns-sd", "-R", BONJOUR_NAME, BONJOUR_SERVICE_TYPE, "local.", str(PORT)],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        log.info(f"advertising {BONJOUR_NAME}.{BONJOUR_SERVICE_TYPE} via Bonjour")
+    except Exception as e:
+        log.error(f"failed to start Bonjour advertisement: {e}")
 
 def get_uid():
     return str(os.getuid())
@@ -152,5 +169,6 @@ def watcher_thread():
 
 if __name__ == "__main__":
     log.info("clipsyncd starting")
+    advertise_bonjour()
     threading.Thread(target=server_thread, daemon=True).start()
     watcher_thread()

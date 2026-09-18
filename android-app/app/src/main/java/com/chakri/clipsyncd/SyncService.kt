@@ -34,6 +34,18 @@ class SyncService : Service() {
     @Volatile private var remoteSetAt: Long = 0L
     @Volatile private var running = false
 
+    private val nsdHelper by lazy {
+        NsdHelper(
+            this,
+            onResolved = { host, port ->
+                Log.i(TAG, "mac discovered via mDNS: $host:$port")
+                discoveredMacHost = host
+                discoveredMacPort = port
+            },
+            onLost = { discoveredMacHost = null }
+        )
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -42,6 +54,7 @@ class SyncService : Service() {
             isRunning = true
             startForegroundWithNotification()
             clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            nsdHelper.start()
             startServer()
             startKeepalive()
             startWatcher()
@@ -54,6 +67,8 @@ class SyncService : Service() {
     override fun onDestroy() {
         running = false
         isRunning = false
+        nsdHelper.stop()
+        discoveredMacHost = null
         serverSocket?.close()
         serverThread?.interrupt()
         keepaliveThread?.interrupt()
@@ -152,21 +167,23 @@ class SyncService : Service() {
     }
 
     private fun sendToMac(text: String) {
-        val macIp = Prefs.getMacIp(this)
-        if (macIp.isNullOrEmpty()) {
-            Log.w(TAG, "mac IP not configured, skipping push")
+        val host = discoveredMacHost ?: Prefs.getMacIp(this)
+        val port = if (discoveredMacHost != null) discoveredMacPort else Protocol.PORT
+        if (host.isNullOrEmpty()) {
+            Log.w(TAG, "mac address not known (no mDNS discovery yet, no manual IP set), skipping push")
             return
         }
         Thread {
             try {
                 Socket().use { socket ->
-                    socket.connect(InetSocketAddress(macIp, Protocol.PORT), Protocol.SOCKET_TIMEOUT_MS)
+                    socket.connect(InetSocketAddress(host, port), Protocol.SOCKET_TIMEOUT_MS)
                     socket.getOutputStream().write(
                         Protocol.frame(Prefs.getSecret(this), text.toByteArray(Charsets.UTF_8))
                     )
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "send to mac failed: ${e.message}")
+                if (host == discoveredMacHost) discoveredMacHost = null
             }
         }.start()
     }
@@ -190,6 +207,10 @@ class SyncService : Service() {
         private const val TAG = "ClipsyncdService"
         private const val NOTIFICATION_ID = 1
         @Volatile var isRunning: Boolean = false
+            private set
+        @Volatile var discoveredMacHost: String? = null
+            private set
+        @Volatile var discoveredMacPort: Int = Protocol.PORT
             private set
     }
 }
