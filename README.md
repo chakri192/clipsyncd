@@ -30,7 +30,7 @@ There are two pieces:
 
 | Side | What it is | Size |
 |---|---|---|
-| macOS | `clipsyncd_mac.py`, a standard-library daemon | 189 lines |
+| macOS | `clipsyncd_mac.py`, a standard-library daemon | 227 lines |
 | Android | `android-app/`, a native Kotlin app | — |
 
 The Android side used to be a Termux script. It got rewritten as a real app because Termux turned out to be fundamentally incompatible with how Android protects the clipboard — the [Architecture](#architecture) section below explains why.
@@ -47,6 +47,7 @@ The Android side used to be a Termux script. It got rewritten as a real app beca
 | Both devices move to a new network together (new Wi-Fi, a phone hotspot) | Works unmodified |
 | Devices end up on *different* networks | Does not work — see [Limitations](#limitations) |
 | A VPN is active on either device | Usually breaks sync (most VPNs tunnel LAN traffic by default) |
+| Phone is locked or asleep when you copy on the Mac | The Mac retries, then holds the latest copy and delivers it the moment the phone wakes (held for up to 15 minutes) |
 | Identical text copied twice | Nothing sent; nothing changed |
 
 ## Requirements
@@ -208,7 +209,7 @@ Or just look at the app — the status card shows color-coded chips for Shizuku,
 
 **Two devices.** The Mac tracks one phone address: whichever connected most recently.
 
-**No queue.** If the peer is unreachable, that one clipboard entry is lost. The next change syncs normally.
+**Only the latest copy is held.** If the phone is unreachable, the Mac keeps the most recent clipboard entry and delivers it when the phone next reconnects, dropping it after 15 minutes. Anything copied in between is superseded, and nothing is held in the other direction — a copy on the phone that can't reach the Mac is lost.
 
 **Shizuku, no root.** The Android side needs Shizuku running. It restarts itself after a reboot via its wireless-debugging path, which needs Wi-Fi to be up at that moment; if it isn't, one manual **Start** tap in Shizuku recovers it. That's the cost of working around Android's background-clipboard restriction without root or turning clipsyncd into the device's keyboard — both worse tradeoffs.
 

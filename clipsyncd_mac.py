@@ -16,6 +16,9 @@ import hashlib
 PORT = 59876
 POLL_INTERVAL = 0.5
 REMOTE_SET_COOLDOWN = 1.5
+SEND_ATTEMPTS = 3
+SEND_RETRY_DELAY = 1.0
+PENDING_MAX_AGE = 900  # don't surprise the phone with a clipboard from long ago
 MAX_MESSAGE_BYTES = 10 * 1024 * 1024  # reject absurd length prefixes (DoS guard)
 BONJOUR_SERVICE_TYPE = "_clipsyncd._tcp"
 BONJOUR_NAME = "clipsyncd"
@@ -49,6 +52,7 @@ log = logging.getLogger(__name__)
 _lock = threading.Lock()
 _remote_set_at = 0.0
 _android_ip = None
+_pending = None  # (text, timestamp) of a push the phone wasn't reachable for
 
 _bonjour_process = None
 
@@ -101,17 +105,46 @@ def set_clipboard(text):
     except Exception as e:
         log.error(f"set_clipboard failed: {e}")
 
-def send_to_android(text):
-    global _android_ip
-    if not _android_ip:
-        log.warning("android IP not known yet, skipping push")
+def _hold_for_android(text, since=None):
+    global _pending
+    with _lock:
+        _pending = (text, since or time.time())
+
+def flush_pending():
+    """Deliver the push that couldn't be sent while the phone was unreachable."""
+    global _pending
+    with _lock:
+        held, _pending = _pending, None
+    if held and time.time() - held[1] <= PENDING_MAX_AGE:
+        log.info(f"phone is reachable again, delivering held push ({len(held[0])} chars)")
+        send_to_android(held[0], held_since=held[1])
+
+def send_to_android(text, held_since=None):
+    global _pending
+    ip = _android_ip
+    if not ip:
+        log.warning("android IP not known yet, holding push until the phone connects")
+        _hold_for_android(text, held_since)
         return
-    try:
-        with socket.create_connection((_android_ip, PORT), timeout=3) as s:
-            s.sendall(frame(text.encode("utf-8")))
-    except Exception as e:
-        log.warning(f"send to android failed: {e}")
-        _android_ip = None
+    payload = frame(text.encode("utf-8"))
+    for attempt in range(1, SEND_ATTEMPTS + 1):
+        try:
+            with socket.create_connection((ip, PORT), timeout=3) as s:
+                s.sendall(payload)
+            with _lock:
+                _pending = None  # anything held is older than what just went out
+            return
+        except Exception as e:
+            log.warning(f"send to android failed (attempt {attempt}/{SEND_ATTEMPTS}): {e}")
+            if attempt < SEND_ATTEMPTS:
+                time.sleep(SEND_RETRY_DELAY)
+    # Deliberately keep _android_ip: a locked phone's Wi-Fi is asleep, so the
+    # first connect fails while the radio wakes, and forgetting the address
+    # here would silently drop every later push until the phone next spoke.
+    # If the phone really moved, its next keepalive or push updates it.
+    # The text itself is held and delivered on that next contact.
+    log.warning("giving up for now, holding push until the phone reconnects")
+    _hold_for_android(text, held_since)  # keep the original age so it can expire
 
 def recv_exact(s, n):
     buf = b""
@@ -123,7 +156,7 @@ def recv_exact(s, n):
     return buf
 
 def server_thread():
-    global _remote_set_at, _android_ip
+    global _remote_set_at, _android_ip, _pending
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("0.0.0.0", PORT))
@@ -154,11 +187,16 @@ def server_thread():
                 _android_ip = addr[0]
                 log.info(f"android connected from {_android_ip}")
                 if length == 0:
+                    if _pending is not None:
+                        # The phone just spoke, so it's awake: hand over what
+                        # was held. Off-thread so we keep accepting meanwhile.
+                        threading.Thread(target=flush_pending, daemon=True).start()
                     continue
                 data = payload.decode("utf-8", errors="replace")
                 log.info(f"received {len(data)} chars from android")
                 with _lock:
                     _remote_set_at = time.time()
+                    _pending = None  # the phone's copy is newer than anything held
                 set_clipboard(data)
         except Exception as e:
             log.error(f"server error: {e}")
