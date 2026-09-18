@@ -11,6 +11,7 @@ Two daemons, one TCP port, and no cloud service, account, or third-party server 
   <img alt="macOS" src="https://img.shields.io/badge/macOS-launchd-1c1c1e?style=flat-square&logo=apple&logoColor=white" />
   <img alt="Android" src="https://img.shields.io/badge/Android-Kotlin%20%2B%20Shizuku-1c1c1e?style=flat-square&logo=android&logoColor=3DDC84" />
   <img alt="Dependencies" src="https://img.shields.io/badge/mac%20side-stdlib%20only-1c1c1e?style=flat-square" />
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-1c1c1e?style=flat-square" /></a>
 </p>
 
 <img alt="clipsyncd architecture: Mac and Android exchanging clipboard changes over TCP, discovered via mDNS" src="docs/architecture.svg" width="600" />
@@ -29,7 +30,7 @@ There are two pieces:
 
 | Side | What it is | Size |
 |---|---|---|
-| macOS | `clipsyncd_mac.py`, a standard-library daemon | 156 lines |
+| macOS | `clipsyncd_mac.py`, a standard-library daemon | 189 lines |
 | Android | `android-app/`, a native Kotlin app | — |
 
 The Android side used to be a Termux script. It got rewritten as a real app because Termux turned out to be fundamentally incompatible with how Android protects the clipboard — the [Architecture](#architecture) section below explains why.
