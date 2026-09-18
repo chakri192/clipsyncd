@@ -199,6 +199,7 @@ Or just look at the app — the status card shows color-coded chips for Shizuku,
 | App shows "mDNS: not discovered" indefinitely | Run `dns-sd -B _clipsyncd._tcp local.` from another machine on the same network. If it finds nothing, the Mac's advertisement isn't running (check its log for "advertising … via Bonjour"). If it does find it but the phone still can't, the network is likely blocking multicast — enter the Mac's IP manually as a fallback |
 | Phone cannot reach the Mac at all | Different networks, or a guest Wi-Fi with client isolation — this breaks mDNS and the manual-IP fallback equally |
 | `HMAC verification failed` in the log | The configured secrets differ between devices |
+| Old or unexpected text appears on the Mac, or the Mac seems to talk to a phone that isn't running the app | A leftover Termux `clipsyncd.py` from the pre-app setup is still running. In Termux: `pkill -f clipsyncd.py`, and rename `~/.termux/boot/clipsyncd.sh` so it doesn't start at boot |
 | Values circulate between devices | Increase `REMOTE_SET_COOLDOWN` / `Protocol.REMOTE_SET_COOLDOWN_MS` |
 
 ## Limitations
