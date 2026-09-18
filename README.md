@@ -26,10 +26,11 @@ Copy a URL on a laptop and paste it on a phone half a second later. Copy a one-t
 | Condition | Behaviour |
 |---|---|
 | Copy on either device | Available on the other within approximately 0.5s |
-| Mac's IP address changes | The phone re-resolves it over mDNS on the next failure |
+| Mac's IP address changes | The phone rediscovers it via mDNS automatically — no reconfiguration |
 | Phone's IP address changes | The Mac relearns it from the next inbound connection, within 30s |
-| Mac reboots | `launchd` restarts the daemon |
+| Mac reboots | `launchd` restarts the daemon, which re-advertises itself over Bonjour |
 | Phone reboots | `SyncService` restarts automatically; Shizuku needs one tap to restart (see [Android](#3-android)) |
+| Either device switches networks (different Wi-Fi, different location) | Works unmodified as long as both are on the same network — mDNS discovery isn't tied to a specific IP or router |
 | VPN enabled | Unaffected — LAN traffic does not enter the tunnel |
 | Identical text copied twice | No transmission; nothing changed |
 
@@ -62,7 +63,6 @@ Create `~/Library/LaunchAgents/com.user.clipsyncd.plist` with `RunAtLoad` and `K
 
 ```sh
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.user.clipsyncd.plist
-hostname     # required for the Android configuration
 ```
 
 ### 3. Android
@@ -83,11 +83,9 @@ gradle assembleDebug
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-5. Open the app, enter the Mac's LAN IP (`ifconfig`/`ipconfig getifaddr en0` on the Mac — not the `.local` hostname; Android's plain DNS resolver does not do mDNS, see [Architecture](#architecture)) and the shared secret, tap **Save**.
+5. Open the app and enter the shared secret, tap **Save**. Leave the Mac IP field blank — the app finds the Mac automatically via mDNS (see [Architecture](#architecture)); that field is only a manual fallback for networks where multicast is blocked.
 6. Tap **Grant Shizuku permission**, allow it.
-7. Tap **Start sync service**.
-
-A static IP only holds if the Mac's DHCP lease doesn't change; setting a DHCP reservation for the Mac's MAC address on your router avoids that.
+7. Tap **Start sync service**. The main screen shows "mDNS: found Mac at …" once discovery succeeds, usually within a few seconds.
 
 ## Architecture
 
@@ -97,7 +95,7 @@ Both sides run the same structure: a watcher polling the clipboard every 0.5s, a
 
 Discovery is asymmetric, and that asymmetry is the central design decision.
 
-**The phone locates the Mac by a configured IP, not mDNS.** The original design resolved `your-mac.local` over mDNS on the phone, the same way it resolves via `dns-sd`/Bonjour on macOS. That doesn't work on stock Android: there's no `nss-mdns`-equivalent wired into the platform's plain DNS resolver, so `.local` names never resolve from an Android app or from Termux. The Mac's LAN IP is configured directly in the app instead; pin it against DHCP churn with a router-side address reservation for the Mac's MAC address.
+**The phone locates the Mac via real mDNS service discovery, not hostname resolution.** The first version tried resolving `your-mac.local` through the phone's plain DNS resolver, the same way `dns-sd`/Bonjour resolves it on macOS. That doesn't work on stock Android: there's no `nss-mdns`-equivalent wired into the platform's plain resolver, so `.local` names never resolve from a normal socket call, confirmed directly (`socket.gethostbyname` and Java's `InetAddress.getByName` both fail the same way). Android does have a working mDNS stack, just not exposed through that API — it's `NsdManager`, which does *service* discovery rather than hostname lookup. `clipsyncd_mac.py` advertises itself with `dns-sd -R clipsyncd _clipsyncd._tcp local. 59876` at startup (a subprocess call, no new Mac-side dependency), and `NsdHelper.kt` browses for that exact service type and instance name, resolving it to a live IP and port whenever it changes — network switches, DHCP renewals, router changes, all handled the same way, automatically. A manually-entered IP in the app remains as a fallback for the rare network that blocks multicast entirely.
 
 **The Mac does not locate the phone.** Android publishes no stable mDNS name, so the Mac instead records the address of the most recent inbound connection. This is why the phone transmits a zero-length keepalive every 30 seconds — not to demonstrate liveness, but to keep the Mac's record current, so that the first Mac-to-phone transmission after a reboot is not sent to a stale address.
 
@@ -113,7 +111,7 @@ The Mac daemon reads its configuration from the environment.
 |---|---|---|
 | `CLIPSYNCD_SECRET` | unset | Shared HMAC key. If unset, the daemon runs in plaintext and logs a warning |
 
-Constants at the top of `clipsyncd_mac.py`: `PORT` (59876), `POLL_INTERVAL` (0.5s), `REMOTE_SET_COOLDOWN` (1.5s), `MAX_MESSAGE_BYTES` (10 MB). The Android app's equivalents live in `Protocol.kt`, and its Mac-IP/secret configuration is entered in-app (persisted to `SharedPreferences`), not read from the environment.
+Constants at the top of `clipsyncd_mac.py`: `PORT` (59876), `POLL_INTERVAL` (0.5s), `REMOTE_SET_COOLDOWN` (1.5s), `MAX_MESSAGE_BYTES` (10 MB), `BONJOUR_SERVICE_TYPE`/`BONJOUR_NAME` (the mDNS advertisement identity). The Android app's equivalents live in `Protocol.kt`, and its Mac-IP/secret configuration is entered in-app (persisted to `SharedPreferences`), not read from the environment — the Mac IP field there is now an optional fallback rather than required input, since `NsdHelper.kt` discovers it automatically.
 
 ## Operation
 
@@ -138,7 +136,8 @@ Or check in-app: the main screen shows Shizuku permission status and whether the
 | Android→Mac stops after a reboot | Shizuku needs a manual "Start" tap after every phone reboot (Android limitation, not fixable without root) — open Shizuku, tap Start |
 | Mac receives nothing from phone | `sudo lsof -i :59876` on the Mac — no listener means the daemon failed to start. On the phone, check Shizuku shows "running" and the app shows "permission granted" |
 | `readText failed` in Android logs | Shizuku isn't running, or its permission wasn't granted to clipsyncd |
-| Phone cannot reach the Mac | Devices on different networks, guest Wi-Fi with client isolation, or the Mac's IP changed (see the DHCP reservation note above) |
+| App shows "mDNS: not discovered" indefinitely | Confirm `dns-sd -B _clipsyncd._tcp local.` finds the Mac from another machine on the same network — if it doesn't, the Mac's advertisement isn't running (check its log for "advertising … via Bonjour"); if it does but the phone still can't see it, the network is likely blocking multicast (some guest/enterprise Wi-Fi does this by policy) — enter the Mac's IP manually as a fallback |
+| Phone cannot reach the Mac at all | Devices on different networks, or guest Wi-Fi with client isolation (rules out both mDNS discovery and the manual-IP fallback equally, since both are plain TCP once the IP is known) |
 | `HMAC verification failed` in the log | The configured secrets differ between devices |
 | Values circulate between devices | Increase `REMOTE_SET_COOLDOWN` / `Protocol.REMOTE_SET_COOLDOWN_MS` |
 
@@ -153,6 +152,8 @@ Or check in-app: the main screen shows Shizuku permission status and whether the
 **No queue.** If the peer is unreachable, that clipboard entry is not delivered. The next change synchronises normally.
 
 **Shizuku dependency, no root.** The Android side needs Shizuku running and one manual restart after each phone reboot. This is a consequence of Android's background-clipboard-access restriction (see Architecture) — there is no way to avoid this without either root or making clipsyncd the device's default keyboard, which was rejected as a worse tradeoff.
+
+**Auto-discovery needs multicast.** mDNS relies on multicast traffic, which some networks (enterprise Wi-Fi, some guest networks) filter by policy regardless of client isolation settings. The manual-IP fallback in the Android app covers this case, but loses the "just works on any network" property.
 
 ## Resource usage
 
