@@ -35,6 +35,11 @@ class SyncService : Service() {
     private var keepaliveThread: Thread? = null
     private var watcherThread: Thread? = null
     @Volatile private var remoteSetAt: Long = 0L
+    // Last text the Mac pushed to us. While the phone is locked the clipboard
+    // can't be read, so the poll first sees that text only after unlock — long
+    // past the echo cooldown. Without this it would be sent straight back to
+    // the Mac as if just copied here, clobbering anything newer copied there.
+    @Volatile private var lastFromMac: String? = null
     @Volatile private var running = false
 
     private val nsdHelper by lazy {
@@ -144,6 +149,11 @@ class SyncService : Service() {
                 if (current == last) continue
                 last = current
                 if (current.isNullOrEmpty()) continue
+                if (current == lastFromMac) {
+                    Log.i(TAG, "ignoring text the mac pushed (read back after the fact)")
+                    continue
+                }
+                lastFromMac = null
                 val since = System.currentTimeMillis() - remoteSetAt
                 if (since < Protocol.REMOTE_SET_COOLDOWN_MS) {
                     Log.i(TAG, "ignoring echo (remote set ${since}ms ago)")
@@ -186,6 +196,7 @@ class SyncService : Service() {
                 if (text != null) {
                     Log.i(TAG, "received ${text.length} chars from mac")
                     remoteSetAt = System.currentTimeMillis()
+                    lastFromMac = text
                     setClipboardText(text)
                 }
             }
