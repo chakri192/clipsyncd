@@ -85,10 +85,10 @@ class SyncService : Service() {
             )
         }
         val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("clipsyncd running")
-            .setContentText("Syncing clipboard with Mac")
-            .setSmallIcon(android.R.drawable.ic_popup_sync)
+            .setContentTitle("clipsyncd active")
+            .setSmallIcon(R.drawable.ic_notification)
             .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setShowWhen(false)
             .setOngoing(true)
             .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

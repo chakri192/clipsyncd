@@ -3,24 +3,30 @@ package com.chakri.clipsyncd
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import android.widget.Button
-import android.widget.EditText
-import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.updatePadding
+import com.google.android.material.button.MaterialButton
+import com.google.android.material.chip.Chip
+import com.google.android.material.color.MaterialColors
+import com.google.android.material.textfield.TextInputEditText
 import rikka.shizuku.Shizuku
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var macIpInput: EditText
-    private lateinit var secretInput: EditText
-    private lateinit var shizukuStatus: TextView
-    private lateinit var serviceStatus: TextView
-    private lateinit var discoveryStatus: TextView
+    private lateinit var macIpInput: TextInputEditText
+    private lateinit var secretInput: TextInputEditText
+    private lateinit var shizukuChip: Chip
+    private lateinit var serviceChip: Chip
+    private lateinit var discoveryChip: Chip
 
     private val shizukuPermissionListener = Shizuku.OnRequestPermissionResultListener { _, _ ->
         refreshStatus()
@@ -30,21 +36,27 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.rootLayout)) { view, insets ->
+            val statusBar = insets.getInsets(WindowInsetsCompat.Type.statusBars())
+            view.updatePadding(top = statusBar.top)
+            insets
+        }
+
         macIpInput = findViewById(R.id.macIpInput)
         secretInput = findViewById(R.id.secretInput)
-        shizukuStatus = findViewById(R.id.accessibilityStatus)
-        serviceStatus = findViewById(R.id.serviceStatus)
-        discoveryStatus = findViewById(R.id.discoveryStatus)
+        shizukuChip = findViewById(R.id.shizukuChip)
+        serviceChip = findViewById(R.id.serviceChip)
+        discoveryChip = findViewById(R.id.discoveryChip)
 
         macIpInput.setText(Prefs.getMacIp(this).orEmpty())
         secretInput.setText(Prefs.getSecret(this).orEmpty())
 
-        findViewById<Button>(R.id.saveButton).setOnClickListener {
+        findViewById<MaterialButton>(R.id.saveButton).setOnClickListener {
             Prefs.save(this, macIpInput.text.toString(), secretInput.text.toString())
             Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
         }
 
-        findViewById<Button>(R.id.openAccessibilityButton).setOnClickListener {
+        findViewById<MaterialButton>(R.id.openAccessibilityButton).setOnClickListener {
             if (!Shizuku.pingBinder()) {
                 Toast.makeText(this, "Shizuku service is not running", Toast.LENGTH_SHORT).show()
             } else if (Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED) {
@@ -54,12 +66,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        findViewById<Button>(R.id.startServiceButton).setOnClickListener {
+        findViewById<MaterialButton>(R.id.startServiceButton).setOnClickListener {
             ContextCompat.startForegroundService(this, Intent(this, SyncService::class.java))
             refreshStatus()
         }
 
-        findViewById<Button>(R.id.stopServiceButton).setOnClickListener {
+        findViewById<MaterialButton>(R.id.stopServiceButton).setOnClickListener {
             stopService(Intent(this, SyncService::class.java))
             refreshStatus()
         }
@@ -85,14 +97,47 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshStatus() {
-        shizukuStatus.text = when {
-            !Shizuku.pingBinder() -> "Shizuku: not running"
-            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED -> "Shizuku: permission granted"
-            else -> "Shizuku: permission NOT granted (required)"
+        when {
+            !Shizuku.pingBinder() -> setChipStatus(shizukuChip, "not running", Status.BAD)
+            Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED ->
+                setChipStatus(shizukuChip, "granted", Status.GOOD)
+            else -> setChipStatus(shizukuChip, "permission needed", Status.BAD)
         }
-        serviceStatus.text = if (SyncService.isRunning) "Service: running" else "Service: stopped"
-        discoveryStatus.text = SyncService.discoveredMacHost?.let { "mDNS: found Mac at $it" }
-            ?: "mDNS: not discovered (using manual IP if set)"
+        setChipStatus(
+            serviceChip,
+            if (SyncService.isRunning) "running" else "stopped",
+            if (SyncService.isRunning) Status.GOOD else Status.NEUTRAL
+        )
+        val macHost = SyncService.discoveredMacHost
+        setChipStatus(
+            discoveryChip,
+            macHost ?: "not found",
+            if (macHost != null) Status.GOOD else Status.NEUTRAL
+        )
+    }
+
+    private enum class Status { GOOD, BAD, NEUTRAL }
+
+    private fun setChipStatus(chip: Chip, text: String, status: Status) {
+        chip.text = text
+        when (status) {
+            Status.GOOD -> {
+                chip.chipBackgroundColor = ColorStateList.valueOf(Color.parseColor("#2E7D32"))
+                chip.setTextColor(Color.WHITE)
+            }
+            Status.BAD -> {
+                chip.chipBackgroundColor = ColorStateList.valueOf(Color.parseColor("#C62828"))
+                chip.setTextColor(Color.WHITE)
+            }
+            Status.NEUTRAL -> {
+                chip.chipBackgroundColor = ColorStateList.valueOf(
+                    MaterialColors.getColor(chip, com.google.android.material.R.attr.colorSurfaceVariant)
+                )
+                chip.setTextColor(
+                    MaterialColors.getColor(chip, com.google.android.material.R.attr.colorOnSurfaceVariant)
+                )
+            }
+        }
     }
 
     companion object {
