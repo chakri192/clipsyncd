@@ -125,17 +125,28 @@ The two sides don't reach the clipboard the same way, though:
 | Find the peer | Waits for an inbound connection | `NsdManager` browses for the Mac's Bonjour service |
 | Advertise itself | `dns-sd -R` at startup | — (Android has no stable mDNS name) |
 
-A few of those rows need the story behind them.
+A few of those rows need explaining.
 
-**Android blocks clipboard reads from apps without UI focus.** Since Android 10, `ClipboardManager.getPrimaryClip()` returns nothing to a caller that isn't the focused app or the default keyboard. This is confirmed, not assumed — the original Termux daemon's `termux-clipboard-get` worked while Termux was on-screen and returned nothing every time it was polled from the background. No background daemon can read a clipboard change made in another app under that restriction, Termux-based or otherwise.
+**Why Android needs Shizuku.** Since Android 10, `ClipboardManager.getPrimaryClip()` only returns data to whichever app currently has focus, or the default keyboard. Everything else gets nothing back.
 
-The fix isn't a permission the app can request. It's routing the read through [Shizuku](https://github.com/RikkaApps/Shizuku), which executes calls with adb-shell-level privilege — a level the focus check doesn't apply to. `IClipboard` is a hidden, non-SDK interface, so reflecting into it also needs a [hidden-API exemption](https://github.com/LSPosed/AndroidHiddenApiBypass). And the normal event-driven API (`OnPrimaryClipChangedListener`) doesn't fire for a backgrounded app either — which is why the Android side polls, the same as the Mac side polls `pbpaste`.
+This was confirmed directly, not assumed: the original Termux daemon could read the clipboard while Termux was on-screen, and got nothing every single time it was polled from the background. No background daemon can read a clipboard change made in another app under this restriction — Termux-based or otherwise.
 
-**Discovery is asymmetric**, and that's deliberate. The phone finds the Mac by real mDNS service discovery: `clipsyncd_mac.py` advertises `_clipsyncd._tcp` over Bonjour at startup, and `NsdHelper.kt` browses for it, resolving a live IP and port that updates automatically on network changes. Plain hostname resolution (`your-mac.local`) was tried first and doesn't work on stock Android — there's no `nss-mdns`-equivalent in the platform resolver, confirmed directly (`socket.gethostbyname` and `InetAddress.getByName` both fail the same way).
+So a background daemon needs a different way in:
 
-The Mac doesn't return the favor. Android has no stable mDNS name to advertise, so the Mac just records whoever connected to it most recently. The phone's 30-second empty keepalive exists to keep that record fresh, not to prove liveness — so the first Mac→phone push after a reboot doesn't go to a stale address.
+- **Shizuku** runs calls with adb-shell-level privilege — a level this focus check simply doesn't apply to.
+- `IClipboard` is a hidden, non-SDK interface. Reflecting into it needs its own [hidden-API exemption](https://github.com/LSPosed/AndroidHiddenApiBypass).
+- The normal event-driven API (`OnPrimaryClipChangedListener`) doesn't fire in the background either — which is why the app polls, the same as the Mac side polls `pbpaste`.
 
-**Echo suppression uses a timestamp, not a flag.** For 1.5 seconds after a remote write, local changes are ignored. Without that, a write triggers the local watcher, which sends it back to where it came from, which triggers *that* watcher — and the value circulates forever. Both sides implement this the same way.
+**Why discovery is asymmetric.** The phone finds the Mac through real mDNS *service* discovery, not hostname resolution:
+
+- `clipsyncd_mac.py` advertises `_clipsyncd._tcp` over Bonjour at startup.
+- `NsdHelper.kt` browses for that service and resolves a live IP and port, one that updates automatically as the network changes.
+
+Plain hostname resolution (`your-mac.local`) was tried first, and doesn't work on stock Android — there's no `nss-mdns` equivalent in the platform's resolver. Confirmed directly: both `socket.gethostbyname` and `InetAddress.getByName` fail the same way.
+
+The Mac doesn't return the favor, because Android has no stable mDNS name of its own to advertise. Instead, the Mac just remembers whoever connected most recently. The phone's 30-second empty keepalive exists to keep that memory current — not to prove it's alive, but so a Mac reboot doesn't leave it pointing at a stale address.
+
+**Echo suppression uses a timestamp, not a flag.** For 1.5 seconds after a remote write, local changes are ignored. Skip this, and a write triggers the local watcher, which sends it back to where it came from, which triggers *that* watcher — and the value circulates forever. Both sides handle this the same way.
 
 ## Configuration
 
